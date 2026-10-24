@@ -1,89 +1,112 @@
-# Studying AI Cost Allocation & Financial Operations (FinOps)
+Studying AI Cost Allocation & Financial Operations (FinOps)
+This repository is where I'm documenting what I learn about AI costs, vendor invoices, and how these costs should be classified in a company's P&L.
 
-Notes, test datasets, and experimental Python scripts documenting my journey in "learning in public" about usage-based AI token bills, vendor invoices, and corporate P&L classification (COGS, R&D, S&M, and G&A).
+Coming from a corporate finance and accounting background, I'm using sample data and Python scripts to explore how finance teams can make sense of AI spending. The focus is on token-based API bills, cloud infrastructure costs, and deciding whether a cost belongs in COGS, R&D, S&M, or G&A.
 
-> 📌 Companion Substack Article: Read the full analytical write-up and narrative notes on Substack:
-> [I'm an FP&A Professional Studying AI Economics—Here's What I Learned About Reconciling LLM Bills](https://substack.com)
+📌 Companion Substack article: I'm an FP&A Professional Studying AI Economics—Here's What I Learned About Reconciling LLM Bills
+Why I Started Looking Into This
+In traditional software environments, month-end close is relatively straightforward. License costs are usually predictable, cloud infrastructure follows known usage patterns, and invoices can often be matched to purchase orders.
 
-## Why I Started Looking Into This
+AI makes things a little more complicated.
+- The same prompt can cost different amounts. Longer context windows, retries, and multi-step AI agents can all increase token usage and the final bill.
+- Invoices don't tell the whole story. Tools such as Cursor, Claude Code, and GitHub Copilot don't always provide the level of detail finance needs to understand exactly where the cost came from.
+- One vendor account can serve several purposes. The same OpenAI, Anthropic, or AWS account might support customer-facing products, R&D experiments, and internal employee tools.
+I wanted to understand how finance teams could deal with these challenges instead of simply recording the invoice and moving on.
 
-Coming from a corporate finance and accounting background, month-end software close always felt fairly predictable: seat licenses were standard, cloud servers scaled on known schedules, and invoices matched purchase orders.
+So I built a small experiment using sample general ledger data and Python to test different ways of classifying AI-related costs.
+The Three Things I Wanted to Understand
+I approached the problem in three stages, starting with the month-end close and working toward more strategic financial analysis.
 
-Generative AI and token-based pricing challenge many of those traditional financial habits:
-1. Token Cost Is Non-Deterministic: Variations in context window length, retry loops, and agent depth cause two identical prompts to incur vastly different token costs.
-2. No Source-Level Resource Tag: API calls and coding assistants (Cursor, Claude Code, GitHub Copilot) do not leave durable infrastructure tags on vendor invoices.
-3. Environment Blending: A single vendor account (e.g., OpenAI, Anthropic, AWS) serves customer-facing production features, R&D fine-tuning, and internal team tools simultaneously.
+1. Month-end close: Can I reconcile the bill?
 
-I created this repository to experiment with rules-based classification methods and explore how finance teams can move from simply transcribing an AI invoice to understanding what actually drove the spend.
+The first step is understanding the difference between internal usage logs, provider cost reports, and the final invoice. I wanted to explore how to account for differences caused by unmetered scripts, console testing, prepaid credits, and reserved usage tiers.
 
-## The 3-Stage Financial Mechanics I Explored
+2. P&L classification: Where should the cost go?
 
-In my research across FinOps literature and technical documentation, I pieced together three interconnected stages of AI cost attribution:
+Not every AI expense belongs in COGS. Customer-facing inference, vector databases, and production observability may belong in COGS, while model training and staging environments may belong in R&D. Internal AI tools used by sales or corporate teams may instead fall under S&M or G&A.
 
-  [1. Month-End Close]  -->  [2. Gross Margin (P&L)]  -->  [3. Unit Economics]
-  Reconcile & Attribute        Classify COGS vs R&D          Track Cost per Outcome
-    (Two-Bridge Close)           (GAAP Accounting)             (Strategic FP&A)
+The challenge is figuring out how to make those decisions consistently, based on how the resource is actually being used.
 
-1. Two-Bridge Reconciliation: Bridging internal request telemetry logs -> Provider Cost APIs -> Final Settlement Invoices to account for unmetered scripts, console tests, prepaid credits, and tier reserves.
-2. P&L Classification (GAAP): Exploring how to distinguish COGS (customer inference, vector databases, production observability) from OpEx (R&D fine-tuning, staging environments) and SG&A (internal enterprise seats).
-3. Strategic Unit Economics: Translating technical token metrics (cost per 1M tokens) into business outcome metrics (cost per resolved ticket, cost per active user cohort, cost per agent run).
+3. Unit economics: What are we getting for the money?
 
-## Repository Structure
+A cost per million tokens is useful, but it doesn't tell the entire business story. I also wanted to explore how technical usage data could be translated into measures such as cost per resolved support ticket, cost per active user cohort, or cost per AI agent run.
 
+The bigger question is how to connect AI usage to the financial outcomes that business leaders care about.
+Repository Structure
 .
-├── README.md                          # Overview & notes
+├── README.md
 ├── data/
-│   └── cost_ledger.csv                # 15-row sample test ledger
+│   └── cost_ledger.csv
 └── scripts/
-    ├── classify_ai_costs_v1_failed.py # Baseline script ($450K R&D trap)
-    └── classify_ai_costs_v2_composite.py # Composite key script
+    ├── classify_ai_costs_v1_failed.py
+    └── classify_ai_costs_v2_composite.py
+The sample ledger contains 15 rows. The two scripts show my first attempt at classification and the revised approach I tested afterward.
+What Went Wrong With My First Script
+My first version, classify_ai_costs_v1_failed.py, used simple keyword rules to classify costs from the general ledger.
 
-## Lessons Learned: My Initial Script Failure
+It worked for some obvious descriptions, but real-world-style data quickly exposed its limitations.
 
-To understand the opacity of AI spend firsthand, I wrote a basic Python script (classify_ai_costs_v1_failed.py) using keyword rules to parse a sample general ledger.
+1. The description wasn't always helpful
 
-It was a humbling experiment that highlighted why automated classification is tricky:
-- The Cryptic Memo Problem: Real AP memos like INV-0093821 usage Aug-Oct or AWS strings like p4d.24xlarge lacked explicit "AI" or "production" keywords, causing them to fall through simple regex rules.
-- The Department Fallback Trap: Defaulting to engineering cost centers when descriptions were sparse caused over $450,000 of production customer-facing hosting to be misclassified into R&D instead of COGS.
+An AP memo such as INV-0093821 usage Aug-Oct doesn't tell you much about the underlying expense. Similarly, an AWS instance name such as p4d.24xlarge doesn't explicitly say whether the resource was used for production or R&D.
 
-### Testing the Composite Key Approach
+Because my rules relied heavily on keywords, some of these entries weren't classified correctly.
 
-In the updated experiment (classify_ai_costs_v2_composite.py), I tested concatenating Vendor + Account + CostCenter + Description into a single CompositeText string. This provided enough context to identify cryptic cloud line items, filter out false positives, and apply weighted splits (e.g., 70% COGS / 30% R&D for shared GPU clusters).
+2. The department fallback created a bigger problem
 
-## Running the Experiments (Python or Excel)
+When the description didn't provide enough information, the script fell back on the engineering cost center.
 
-Option A: Testing in Excel with Python in Excel (PY())
+That assumption caused more than $450,000 of production customer-facing hosting costs to be classified as R&D instead of COGS in my test scenario.
+
+This was the most important lesson from the first attempt: a rule that seems reasonable at first can create a significant reporting error when applied to the wrong data.
+Testing a Better Approach: Composite Keys
+In classify_ai_costs_v2_composite.py, I tried combining four fields into one text field:
+
+Vendor + Account + CostCenter + Description
+
+I called this CompositeText.
+
+The idea was simple: instead of looking at the transaction description in isolation, give the script more context before making a classification decision.
+
+This helped identify some of the less obvious cloud costs and filter out false positives. I also tested weighted allocations for shared resources, such as splitting a GPU cluster 70% to COGS and 30% to R&D.
+
+This is still an experiment using sample data, not a production-ready accounting system. The results depend on the quality of the underlying data and the classification rules. Shared costs, in particular, need a defensible allocation basis rather than an arbitrary percentage.
+How to Run the Experiments
+Option A: Try It in Excel with Python in Excel
 1. Open data/cost_ledger.csv in Microsoft Excel.
-2. Format the dataset as an Excel Table named CostLedger.
-3. In a new cell, type =PY and paste the code from scripts/classify_ai_costs_v2_composite.py.
-4. Reference the table using df = CostLedger.copy().
-
-Option B: Running Standalone Python
-Clone the repository and run either script directly from your terminal:
-
+2. Format the data as an Excel Table named CostLedger.
+3. In a Python cell, use the table as your starting DataFrame:
+df = CostLedger.copy()
+4. Copy the relevant classification logic from scripts/classify_ai_costs_v2_composite.py into the Python cell and adapt it to work with the table.
+Option B: Run the Scripts in Python
+Clone the repository and run the scripts from your terminal:
 git clone https://github.com/your-username/ai-cost-allocation-framework.git
 cd ai-cost-allocation-framework
+
 python scripts/classify_ai_costs_v1_failed.py
 python scripts/classify_ai_costs_v2_composite.py
+Replace your-username with the actual GitHub username once the repository is published.
+Results From the Sample Dataset
+Running the revised script against the 15-row sample ledger produced the following classification results:
+Classification	Rows	Amount	Share
+COGS	7	$205,370	72.8%
+R&D	6	$68,680	24.3%
+S&M	1	$7,500	2.7%
+G&A	1	$1,100	0.4%
+Not_AI	2	$1,000	Excluded
 
-## Sample Output From Test Dataset
 
-Running classify_ai_costs_v2_composite.py against the 15-row sample ledger yields:
+The COGS total includes production inference, vector database costs, and the allocated 70% share of the GPU cluster. R&D includes model training jobs, Copilot, and the remaining 30% of that shared cluster.
 
-- COGS (7 rows, $205,370.00 / 72.8%): Production inference, vector DB, 70% GPU cluster split
-- R&D (6 rows, $68,680.00 / 24.3%): Model training jobs, Copilot, 30% GPU cluster split
-- S&M (1 row, $7,500.00 / 2.7%): Revenue intelligence & sales scoring AI
-- G&A (1 row, $1,100.00 / 0.4%): Internal ChatGPT Team seats
-- Not_AI (2 rows, $1,000.00): Excluded tax software & offsite entertainment guardrails
+The Not_AI category captures two entries, including tax software and offsite entertainment, that the rules exclude from AI cost allocation.
 
-## Sources & Further Reading
-
-- Finout: "FinOps for AI Agents: A Four-Step Allocation Framework"
-- Ben Murray (The SaaS CFO): "What Should Be Included in AI COGS"
-- Spendline: "How to Reconcile OpenAI and Anthropic Invoices"
-- CloudZero: "State of AI Costs Report"
-- ICONIQ Growth: "State of AI Report & Gross Margin Benchmarks"
-
-## License
-
-This repository is shared under the MIT License for educational purposes. Feel free to fork and test with your own sample ledger structures.
+These figures are outputs from the sample dataset, not industry benchmarks. The purpose of the exercise was to test the classification logic and see how a change in approach could affect the resulting P&L.
+Sources and Further Reading
+These are some of the resources I explored while learning more about AI cost allocation, cloud spending, and SaaS economics:
+- Finout — FinOps for AI Agents: A Four-Step Allocation Framework
+- Ben Murray (The SaaS CFO) — What Should Be Included in AI COGS
+- Spendline — How to Reconcile OpenAI and Anthropic Invoices
+- CloudZero — State of AI Costs Report
+- ICONIQ Growth — State of AI Report & Gross Margin Benchmarks
+License
+This repository is shared under the MIT License for educational purposes. Feel free to fork it and experiment with your own sample ledger structures and classification rules.
