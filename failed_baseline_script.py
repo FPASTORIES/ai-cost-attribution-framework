@@ -8,7 +8,7 @@ against sparse description fields and raw cost center fallbacks.
 Key Failure Points Discovered:
 1. False Negatives: Missed GPU instances (p4d.24xlarge) due to lack of explicit "AI" keywords.
 2. False Positives: Accidental matches on "vertex inc" (tax software) and "fireworks events".
-3. Department Fallback Trap: Silent misclassification of ~$450K in customer-facing
+3. Department Fallback Trap: Silent misclassification of ~$145K in customer-facing
    production infrastructure into R&D because cost center was "Engineering".
 """
 
