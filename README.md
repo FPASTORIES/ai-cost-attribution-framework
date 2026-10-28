@@ -9,6 +9,7 @@ Coming from a corporate finance and accounting background, I'm using sample data
 
 
 I'm an FP&A Professional Studying AI Economics—Here's What I Learned About Reconciling LLM Bills
+
 Why I Started Looking Into This
 In traditional software environments, month-end close is relatively straightforward. License costs are usually predictable, cloud infrastructure follows known usage patterns, and invoices can often be matched to purchase orders.
 
