@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""
+Classify AI-related costs from a SQL table into P&L buckets (COGS, R&D, S&M, G&A).
+
+Usage:
+  python classify_ai_costs.py --demo
+  python classify_ai_costs.py --db "postgresql://user:pw@host/db" \
+      --query "SELECT * FROM cost_ledger WHERE period >= '2026-01-01'" \
+      --out classified.csv [--write-table ai_costs_classified] [--rules rules.json]
+
+Requires: pandas, sqlalchemy (+ your DB driver, e.g. psycopg2)
+
+Expected columns (missing ones are treated as empty text, rename via COLUMN_MAP):
+  amount (numeric), vendor, account, cost_center, description
+"""
+import argparse
+import json
+import sys
+
+import pandas as pd
+from sqlalchemy import create_engine
+
+# Map YOUR column names -> the names this script expects.
+COLUMN_MAP = {
+    # "total_cost": "amount",
+    # "supplier": "vendor",
+    # "dept": "cost_center",
+    # "memo": "description",
+}
+
+TEXT_COLS = ["vendor", "account", "cost_center", "description"]
+
+# A row is "AI related" if ANY of these text columns matches this regex.
+AI_FILTER = {
+    "columns": ["vendor", "account", "description"],
+    "regex": (
+        r"openai|anthropic|claude|gpt|llm|gemini|bedrock|sagemaker|vertex|"
+        r"azure openai|cohere|mistral|together\.ai|fireworks|replicate|hugging ?face|"
+        r"copilot|cursor|pinecone|weaviate|gpu|a100|h100|inference|fine-?tun|"
+        r"\bml\b|machine learning|\bai\b|embedding"
+    ),
+}
+
+# Rules are evaluated IN ORDER; first match wins. Within a rule, every column
+# regex must match (AND). Optional "split" allocates one row across buckets
+# (fractions must sum to 1) for shared/mixed spend.
+DEFAULT_RULES = [
+    # --- R&D: building/improving models ---
+    {"name": "Training / fine-tuning / experiments", "bucket": "R&D",
+     "match": {"description": r"train|fine-?tun|experiment|research|prototype|eval|benchmark|sandbox|dev\b|staging"}},
+    {"name": "Engineering dev tools (Copilot, Cursor)", "bucket": "R&D",
+     "match": {"description": r"copilot|cursor", "cost_center": r"eng|r&d|data|ml|platform"}},
+
+    # --- COGS: delivering the product to customers ---
+    {"name": "Customer-facing inference", "bucket": "COGS",
+     "match": {"description": r"inference|serving|production|prod\b|customer|api usage|embedding|vector"}},
+    {"name": "Customer support AI", "bucket": "COGS",
+     "match": {"cost_center": r"support|customer success|cs\b"}},
+    {"name": "Shared GPU / hosting (70/30 prod vs R&D)", "bucket": "COGS",
+     "match": {"vendor": r"aws|azure|gcp|google cloud|coreweave|lambda", "description": r"gpu|a100|h100"},
+     "split": {"COGS": 0.7, "R&D": 0.3}},
+
+    # --- S&M ---
+    {"name": "Sales & marketing AI", "bucket": "S&M",
+     "match": {"cost_center": r"marketing|sales|growth|demand|revops"}},
+    {"name": "Marketing use cases", "bucket": "S&M",
+     "match": {"description": r"copywriting|lead scor|outbound|campaign|seo"}},
+
+    # --- G&A ---
+    {"name": "Internal G&A AI", "bucket": "G&A",
+     "match": {"cost_center": r"finance|legal|hr\b|people|it\b|admin|g&a|exec|ops"}},
+
+    # --- R&D by department as a catch-all for engineering teams ---
+    {"name": "Eng/Data department catch-all", "bucket": "R&D",
+     "match": {"cost_center": r"eng|data science|ml|research|r&d|product"}},
+]
+
+FALLBACK_BUCKET = "Unclassified"
+
+
+def load_rules(path):
+    if not path:
+        return DEFAULT_RULES
+    with open(path) as f:
+        return json.load(f)
+
+
+def prepare(df):
+    df = df.rename(columns=COLUMN_MAP).copy()
+    if "amount" not in df.columns:
+        sys.exit("No 'amount' column found. Set COLUMN_MAP or alias it in your query.")
+    for c in TEXT_COLS:
+        df[c] = df[c].fillna("").astype(str) if c in df.columns else ""
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
+    return df
+
+
+def is_ai(df):
+    mask = pd.Series(False, index=df.index)
+    for c in AI_FILTER["columns"]:
+        mask |= df[c].str.contains(AI_FILTER["regex"], case=False, regex=True, na=False)
+    return mask
+
+
+def classify(df, rules):
+    df = df.copy()
+    df["bucket"] = None
+    df["rule"] = None
+    df["split"] = None
+    for r in rules:
+        mask = df["bucket"].isna()
+        for col, rx in r["match"].items():
+            mask &= df[col].str.contains(rx, case=False, regex=True, na=False)
+        df.loc[mask, "bucket"] = r["bucket"]
+        df.loc[mask, "rule"] = r["name"]
+        if "split" in r:
+            if abs(sum(r["split"].values()) - 1.0) > 1e-9:
+                sys.exit(f"Split for rule '{r['name']}' must sum to 1.0")
+            df.loc[mask, "split"] = json.dumps(r["split"])
+    unmatched = df["bucket"].isna()
+    df.loc[unmatched, "bucket"] = FALLBACK_BUCKET
+    df.loc[unmatched, "rule"] = "no rule matched"
+    return df
+
+
+def expand_splits(df):
+    rows = []
+    for row in df.to_dict("records"):
+        if row["split"]:
+            for bucket, pct in json.loads(row["split"]).items():
+                new = row.copy()
+                new["bucket"] = bucket
+                new["amount"] = row["amount"] * pct
+                new["rule"] = f"{row['rule']} ({pct:.0%})"
+                rows.append(new)
+        else:
+            rows.append(row)
+    return pd.DataFrame(rows).drop(columns=["split"])
+
+
+def demo_engine():
+    eng = create_engine("sqlite://")
+    pd.DataFrame([
+        ("OpenAI", "Cloud/API", "platform", "GPT-4 API usage - production inference", 42000),
+        ("Anthropic", "Cloud/API", "engineering", "Claude API - eval harness experiments", 8000),
+        ("AWS", "Cloud", "infra", "H100 GPU cluster", 120000),
+        ("GitHub", "Software", "engineering", "Copilot seats", 6500),
+        ("Intercom", "Software", "support", "AI support agent (Fin)", 9000),
+        ("Jasper", "Software", "marketing", "AI copywriting", 3200),
+        ("OpenAI", "Software", "finance", "ChatGPT Team - month-end close", 1100),
+        ("Pinecone", "Cloud", "platform", "Vector DB for customer search", 5400),
+        ("Midjourney", "Software", "", "Misc AI subscription", 300),
+        ("Staples", "Office", "admin", "Printer paper", 150),
+    ], columns=["vendor", "account", "cost_center", "description", "amount"]).to_sql(
+        "cost_ledger", eng, index=False)
+    return eng
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", help="SQLAlchemy URL")
+    ap.add_argument("--query", default="SELECT * FROM cost_ledger")
+    ap.add_argument("--rules", help="JSON file overriding DEFAULT_RULES")
+    ap.add_argument("--out", default="classified_ai_costs.csv")
+    ap.add_argument("--write-table", help="Write results back to this table")
+    ap.add_argument("--demo", action="store_true", help="Run on built-in sample data")
+    args = ap.parse_args()
+
+    if args.demo:
+        engine = demo_engine()
+    elif args.db:
+        engine = create_engine(args.db)
+    else:
+        sys.exit("Provide --db or --demo")
+
+    raw = pd.read_sql(args.query, engine)
+    df = prepare(raw)
+    ai = df[is_ai(df)]
+    print(f"{len(ai)} of {len(df)} rows flagged as AI-related "
+          f"(${ai['amount'].sum():,.0f} of ${df['amount'].sum():,.0f})")
+
+    result = expand_splits(classify(ai, load_rules(args.rules)))
+
+    summary = result.groupby("bucket")["amount"].agg(["count", "sum"]).rename(
+        columns={"count": "rows", "sum": "total"})
+    summary["pct"] = summary["total"] / summary["total"].sum()
+    print("\n" + summary.to_string(float_format=lambda x: f"{x:,.2f}"))
+
+    un = result[result["bucket"] == FALLBACK_BUCKET]
+    if len(un):
+        print(f"\n{len(un)} unclassified rows - review these and add rules:")
+        print(un[["vendor", "cost_center", "description", "amount"]].to_string(index=False))
+
+    result.to_csv(args.out, index=False)
+    print(f"\nWrote {args.out}")
+    if args.write_table:
+        result.to_sql(args.write_table, engine, if_exists="replace", index=False)
+        print(f"Wrote table {args.write_table}")
+
+
+if __name__ == "__main__":
+    main()
