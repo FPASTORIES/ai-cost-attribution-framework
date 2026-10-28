@@ -7,6 +7,7 @@ Coming from a corporate finance and accounting background, I'm using sample data
 
 📌 Companion Substack article
 
+
 I'm an FP&A Professional Studying AI Economics—Here's What I Learned About Reconciling LLM Bills
 Why I Started Looking Into This
 In traditional software environments, month-end close is relatively straightforward. License costs are usually predictable, cloud infrastructure follows known usage patterns, and invoices can often be matched to purchase orders.
@@ -59,7 +60,7 @@ Because my rules relied heavily on keywords, some of these entries weren't class
 2. The department fallback created a bigger problem
 When the description didn't provide enough information, the script fell back on the engineering cost center.
 
-That assumption caused more than $450,000 of production customer-facing hosting costs to be classified as R&D instead of COGS in my test scenario.
+That assumption caused more than $145000 of production customer-facing hosting costs to be classified as R&D instead of COGS in my test scenario.
 
 This was the most important lesson from the first attempt: a rule that seems reasonable at first can create a significant reporting error when applied to the wrong data.
 Testing a Better Approach: Composite Keys
@@ -71,7 +72,7 @@ Vendor + Account + CostCenter + Description
 
 I called this CompositeText.
 
-The idea was simple: instead of looking at the transaction description in isolation, give the script more context before making a classification decision.
+Instead of looking at the transaction description in isolation, give the script more context before making a classification decision.
 
 This helped identify some of the less obvious cloud costs and filter out false positives. I also tested weighted allocations for shared resources, such as splitting a GPU cluster 70% to COGS and 30% to R&D.
 
@@ -91,16 +92,16 @@ cd ai-cost-allocation-framework
 
 python scripts/classify_ai_costs_v1_failed.py
 python scripts/classify_ai_costs_v2_composite.py
-Replace your-username with the actual GitHub username once the repository is published.
+
 Results From the Sample Dataset
 Classification results from the 15-row test ledger
 
 Running the revised script against the 15-row sample ledger produced the following classification results:
 Classification	Rows	Amount	Share
-COGS	7	$205,370	72.8%
-R&D	6	$68,680	24.3%
-S&M	1	$7,500	2.7%
-G&A	1	$1,100	0.4%
+COGS	7	$200,971	
+R&D	6	$66,790	
+S&M	1	$8,400	
+G&A	1	$1,100
 Not_AI	2	$1,000	Excluded
 
 
@@ -113,10 +114,8 @@ Sources and Further Reading
 Resources I explored while learning about AI cost allocation, cloud spending, and SaaS economics:
 
 These are some of the resources I explored while learning more about AI cost allocation, cloud spending, and SaaS economics:
-- Finout — FinOps for AI Agents: A Four-Step Allocation Framework
-- Ben Murray (The SaaS CFO) — What Should Be Included in AI COGS
-- Spendline — How to Reconcile OpenAI and Anthropic Invoices
-- CloudZero — State of AI Costs Report
-- ICONIQ Growth — State of AI Report & Gross Margin Benchmarks
+Spendline —https://www.spendline.ai/guides/reconcile-openai-anthropic-invoices/
+Finout — https://www.finout.io/blog/finops-for-ai-agents-a-four-step-allocation-framework
+The SaaS CFO — https://www.thesaascfo.com/what-should-be-included-in-ai-cogs/
 License
 This repository is shared under the MIT License for educational purposes. Feel free to fork it and experiment with your own sample ledger structures and classification rules.
